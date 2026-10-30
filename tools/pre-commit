@@ -1,0 +1,36 @@
+#!/bin/sh
+# Refuse any commit that is not made under this repository's one permitted
+# identity. Allowlist by design: it knows the correct answers, not a list of
+# wrong ones. See CLAUDE.md.
+#
+# Checks the identity the commit will actually be recorded under, not just
+# `git config`: `git var` accounts for `--author` and for the GIT_AUTHOR_* and
+# GIT_COMMITTER_* environment variables, any of which would otherwise slip a
+# different name past a config check. The committer is checked as well as the
+# author — both are written into the commit, and both are public.
+#
+# Install:  cp tools/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+
+expect_ident="Michael Sullivan <17531745+GeniusUnleashed@users.noreply.github.com>"
+expect_origin="https://github.com/GeniusUnleashed/tape-calculator.git"
+
+fail() {
+	echo "pre-commit: refused — $1" >&2
+	echo "pre-commit: see the identity table in CLAUDE.md" >&2
+	exit 1
+}
+
+# An ident reads "Name <email> timestamp timezone"; drop the last two fields.
+check() {
+	ident="$(git var "$1" 2>/dev/null)" || fail "could not determine the $2 identity"
+	ident="${ident% * *}"
+	[ "$ident" = "$expect_ident" ] || fail "$2 is '$ident', expected '$expect_ident'"
+}
+
+check GIT_AUTHOR_IDENT author
+check GIT_COMMITTER_IDENT committer
+
+origin="$(git remote get-url origin 2>/dev/null)"
+[ -z "$origin" ] || [ "$origin" = "$expect_origin" ] || fail "origin is '$origin', expected '$expect_origin'"
+
+exit 0

@@ -1,0 +1,49 @@
+#!/bin/sh
+# Refuse a push to anywhere but this repository's one permitted remote, or a
+# push carrying any commit not made under its one permitted identity. See
+# CLAUDE.md.
+#
+# The pre-commit hook checks `origin`, but a push can name another remote or a
+# bare URL — `git push https://… main` — and never consult `origin` at all.
+# Git hands this hook the URL actually being pushed to, so that is what gets
+# checked.
+#
+# The pre-commit hook also checks author and committer, but a commit can reach
+# a push without passing it: `--no-verify`, a rebase or cherry-pick (neither
+# runs pre-commit), or a commit made in a fresh clone before the hooks were
+# reinstated. So every commit being pushed is checked again, as recorded.
+#
+# Install:  cp tools/pre-push .git/hooks/pre-push && chmod +x .git/hooks/pre-push
+
+expect_url="https://github.com/GeniusUnleashed/tape-calculator.git"
+expect_ident="Michael Sullivan <17531745+GeniusUnleashed@users.noreply.github.com>"
+
+fail() {
+	echo "pre-push: refused — $1" >&2
+	echo "pre-push: see the identity table in CLAUDE.md" >&2
+	exit 1
+}
+
+[ "$2" = "$expect_url" ] || fail "pushing to '$2', expected '$expect_url'"
+
+# Git supplies one line per ref being pushed:
+#   <local ref> <local oid> <remote ref> <remote oid>
+# An all-zero oid means "none": a deletion locally, a new branch remotely.
+# Commits already on the remote are excluded; when the remote's tip is unknown
+# here, everything not on any remote-tracking branch is checked instead.
+while read -r local_ref local_oid remote_ref remote_oid; do
+	case "$local_oid" in *[!0]*) ;; *) continue ;; esac
+
+	exclude="--remotes"
+	case "$remote_oid" in
+	*[!0]*) git cat-file -e "$remote_oid^{commit}" 2>/dev/null && exclude="$remote_oid" ;;
+	esac
+
+	idents="$(git log --format='%an <%ae>%n%cn <%ce>' "$local_oid" --not $exclude)" ||
+		fail "could not list the commits being pushed to $remote_ref"
+
+	bad="$(printf '%s\n' "$idents" | grep -vxF "$expect_ident" | head -n 1)"
+	[ -z "$bad" ] || fail "$remote_ref would carry a commit by '$bad', expected '$expect_ident'"
+done
+
+exit 0
